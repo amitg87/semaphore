@@ -1,0 +1,302 @@
+The Little Book of Semaphores
+	- Allen Downey
+
+Synchronization is hard
+	part of OS course
+	little focus and practice
+	very important in practice with widely available parallel processors.
+	more problems and solutions
+	identify patterns and apply them to wider class of problems. arrive at more generic solutions.
+
+Synchronization:
+In common use, “synchronization” means making two things happen at the same time.
+In computer systems, synchronization is a little more general; it refers to relationships among events—any number of events, and any kind of relationship (before, during, after).
+
+Synchronization Constraints:
+Computer programmers are often concerned with synchronization constraints, which are requirements pertaining to the order of events. Examples include:
+Serialization(sequence): Event A must happen before Event B.
+Mutual exclusion(atomicity): Events A and B must not happen at the same time.
+
+Universal clock and lack thereof
+In real life we often check and enforce synchronization constraints using a clock. How do we know if A happened before B? If we know what time both events occurred, we can just compare the times.
+In computer systems, we often need to satisfy synchronization constraints without the benefit of a clock, either because there is no universal clock, or because we don’t know with fine enough resolution when events occur. There can not be universal clock because of clock drift, leap seconds, too many things happening at same time(GHz).
+
+
+Execution model
+In order to understand software synchronization, you have to have a model of how computer programs run.
+
+1. Single Processor, Single Process model: computers execute one instruction after another in sequence. In this model, synchronization is trivial; we can tell the order of events by looking at the program. If Statement A comes before Statement B, it will be executed first.
+
+2. Multiple processor, Multiple Process model(Physical concurrency): multiple processors running at the same time. In that case it is not easy to know if a statement on one processor is executed before a statement on another.
+
+3. Multithreaded, Multiple Process Model(Logical Concurrency): single processor is running multiple threads of execution. A thread is a sequence of instructions that execute sequentially. If there are multiple threads, then the processor can work on one for a while, then switch to another, and so on.
+In general the programmer has no control over when each thread runs; the operating system (specifically, the scheduler) makes those decisions. As a result, again, the programmer can’t tell when statements in different threads will be executed.
+
+For purposes of synchronization, there is no difference between the parallel model and the multithreaded model. The issue is the same—within one processor (or one thread) we know the order of execution, but between processors (or threads) it is impossible to tell.
+
+
+Happen Before Relation: '<'
+
+a < b → a happened before b
+properties:
+1. not symmetric - if a < b then b < a is false
+2. not reflexive - a < a is not true
+3. transitive - if a < b, b < c then a < c
+
+Based on this definition - we can mark relation between events:
+concurrent event: we can not exactly determine sequence of event between two. Non-determinism at play, two events are completely independent of each other.
+sequential event: we know order of events
+
+
+Shared Variable and Concurrent Writes
+variables are shared among two or more threads; this is one of the ways threads interact with each other. For example, one way to communicate information between threads is for one thread to read a value written by another thread.
+
+Example 1:
+If the threads are unsynchronized, then we cannot tell by looking at the program whether the reader will see the value the writer writes or an old value that was already there. Thus many applications enforce the constraint that the reader should not read until after the writer writes.
+Thread A
+A1: X =5
+A2: Print X
+
+Thread B
+B1: X =7
+
+What value of x gets printed? What is the final value of x when all these statements have executed? It depends on the order in which the statements are executed, called the execution path.
+
+Possible Sequence:
+1. A1 < A2 < B1 -> 7 5
+2. A1 < B1 < A2 -> 7 7
+3. B1 < A1 < A2 -> 5 5
+
+What paths are possible and what are the possible effects? Can we prove that a given (desirable) effect is necessary or that an (undesirable) effect is impossible?
+
+
+Example 2:
+What will the output? Two threads A and B running concurrently.
+
+Thread A
+print "yes"
+
+Thread B
+print "no"
+
+Possibility
+1. "yes" "no"
+2. "no" "yes"
+3. "ynoes" or any combination of chars - if print is not atomic
+
+Example 3:
+The following example shows a shared variable, count, being updated concurrently by two threads.
+
+Thread A
+A1: Count++ 
+
+Thread B
+B1: Count++
+
+At first glance, it is not obvious that there is a synchronization problem here.
+There are only two execution paths, and they yield the same result.
+The problem is that these operations are translated into machine language before execution, and in machine language the update takes two steps, a read and a write. The problem is more obvious if we rewrite the code with a temporary variable, temp.
+
+Thread A
+A1: Memory = count
+A2: Count = count + 1
+A3: Memory = count
+
+Thread B
+B1: Memory = count
+B2: Count = count + 1
+B3: Memory = count
+
+Now consider the following execution path
+a1 < b1 < b2 < a2 < a3 < b3 
+Assuming that the initial value of x is 0, what is its final value? Because both threads read the same initial value, they write the same value. The variable is only incremented once, which is probably not what the programmer had in mind.
+
+Atomic Operation:
+Operations need to be performed in a single step and which can be interrupted. In fact, some computers provide an increment instruction that is implemented in hardware cannot be interrupted. An operation
+that cannot be interrupted is said to be atomic.
+
+
+Semaphores:
+In real life a semaphore is a system of signals used to communicate visually, usually with flags, lights, or some other mechanism. In software, a semaphore is a data structure that is useful for solving a variety of synchronization problems. Semaphores were invented by Edsger Dijkstra.
+
+Definition
+A semaphore is like an integer, with three differences:
+1. When you create the semaphore, you can initialize its value to any integer, but after that the only operations you are allowed to perform are increment/signal (increase by one) and decrement/wait (decrease by one). You cannot read the current value of the semaphore.
+2. When a thread decrements the semaphore, if the result is negative, the thread blocks itself and cannot continue until another thread increments the semaphore.
+3. When a thread increments the semaphore, if there are other threads waiting, one of the waiting threads gets unblocked.
+
+Why no getter?
+value will be stale by the time you use the value
+
+Thread Blocking details:
+To say that a thread blocks itself (or simply “blocks”) is to say that it notifies the scheduler that it cannot proceed. The scheduler will prevent the thread from running until an event occurs that causes the thread to become unblocked. In the tradition of mixed metaphors in computer science, unblocking is often called “waking”.
+
+In general, there is no way to know before a thread decrements a semaphore whether it will block or not (in specific cases you might be able to prove that it will or will not).
+After a thread increments a semaphore and another thread gets woken up, both threads continue running concurrently. There is no way to know which thread, if either, will continue immediately.
+When you signal a semaphore, you don’t necessarily know whether another thread is waiting, so the number of unblocked threads may be zero or one.
+
+Possible values of semaphore:
+If the value is positive, then it represents the number of threads that can decrement without blocking. If it is negative, then it represents the number of threads that have blocked and are waiting. If the value is zero, it means there are no threads waiting, but if a thread tries to decrement, it will block.
+
+Why semaphores?
+advantages to using them:
+1. Simple, clean and organized
+2. Versatile
+
+Why Not semaphores?
+1. Relatively low level of abstraction in synchronization.
+2. Error-prone and difficult to handle abstractions
+
+
+Other constructs of synchronization:
+1. Monitor
+2. 
+
+
+Basic Synchronization pattern:
+
+This chapter presents a series of basic synchronization problems and shows ways of using semaphores to solve them. These problems include serialization and mutual exclusion, which we have already seen, along with others.
+
+1. Semaphore Signaling
+One thread sends a signal to another thread to indicate that something has happened.
+Signaling makes it possible to guarantee that a section of code in one thread will run before a section of code in another thread; in other words, it solves the serialization problem.
+Assume that we have a semaphore named sem with initial value 0, and that Threads A and B have shared access to it.
+
+Thread A
+
+A1: sem.signal()
+A2: something
+
+Thread B
+B1: sem.wait()
+B2: something
+
+The semaphore in this program guarantees that Thread A has completed a1 before Thread B begins b1.
+Here’s how it works: if thread B gets to the wait statement first, it will find the initial value, zero, and it will block. Then when Thread A signals, Thread B proceeds.
+Similarly, if Thread A gets to the signal first then the value of the semaphore will be incremented, and when Thread B gets to the wait, it will proceed immediately. Either way, the order of a1 and b1 is guaranteed.
+
+example 2:
+How to make sure Alice eats before Bob
+Thread A - Alice
+A1: Eat breakfast
+A2: Work
+A3: Eat lunch
+A4: Call Bob [semaphore.signal()]
+
+Thread B - Bob
+B1:Eat breakfast
+B2: Wait for a call [semaphore.wait()]
+B3: Eat lunch
+
+1.1. Semaphore Rendezvous
+Puzzle: Generalize the signal pattern so that it works both ways. Thread A has to wait for Thread B and vice versa. In other words, given this code
+Thread A
+A1: 
+A2:
+
+Thread B
+B1:
+B2:
+
+we want to guarantee that A1 < b2 and B1 < A2.
+This synchronization problem has a name; it’s a rendezvous. The idea is that two threads rendezvous at a point of execution, and neither is allowed to proceed until both have arrived.
+
+Solution 1:
+
+Thread A
+statement a1
+bArrived.wait()
+aArrived.signal()
+statement a2
+
+Thread B
+statement b1
+aArrived.wait()
+bArrived.signal()
+statement b2
+
+Deadlock -> both threads wait for each other
+
+Solution 2:
+
+Thread A
+statement a1
+bArrived.wait()
+aArrived.signal()
+statement a2
+
+Thread B
+statement b1
+bArrived.signal()
+aArrived.wait()
+statement b2
+
+If A arrives first, it waits for B. When B arrives, it wakes A and might proceed immediately to its wait in which case it blocks, allowing A to reach its signal, after which both threads can proceed.
+This solution also works, although it is probably less efficient, since it might have to switch between A and B one time more than necessary.
+
+solution 3:
+
+Thread A
+statement a1
+aArrived.signal()
+bArrived.wait()
+statement a2
+
+Thread B
+statement b1
+bArrived.signal()
+aArrived.wait()
+statement b2
+
+
+2. Mutex
+A second common use for semaphores is to enforce mutual exclusion. We have already seen one use for mutual exclusion, controlling concurrent access to shared variables. The mutex guarantees that only one thread accesses the shared variable at a time.
+e.g. A mutex is like a token that passes from one thread to another, allowing one thread at a time to proceed. For example, in The Lord of the Flies a group of children use a conch as a mutex. In order to speak, you have to hold the conch. As long as only one child holds the conch, only one can speak.
+e.g. cat and dog only one can in porch at a time.
+Similarly, in order for a thread to access a shared variable, it has to “get” the mutex; when it is done, it “releases” the mutex. Only one thread can hold the mutex at a time.
+
+example:
+mutex = new Mutex(1)
+
+mutex.enter()
+	count++
+mutex.leave()
+
+3. Multiplex
+Puzzle: Generalize the previous solution so that it allows multiple threads to run in the critical section at the same time, but it enforces an upper limit on the number of concurrent threads. In other words, no more than n threads can run in the critical section at the same time.
+This pattern is called a multiplex. In real life, the multiplex problem occurs at busy nightclubs where there is a maximum number of people allowed in the building at a time, either to maintain fire safety or to create the illusion of exclusivity.
+At such places a bouncer usually enforces the synchronization constraint by keeping track of the number of people inside and barring arrivals when the room is at capacity. Then, whenever one person leaves another is allowed to enter.
+Enforcing this constraint with semaphores may sound difficult, but it is almost trivial.
+
+e.g.
+
+multiplex = new Multiplex(5)
+
+multiplex.enter()
+multiplex.leave()
+
+4. Barrier
+Generalization of Rendezvous problem: A limitation of the solution we presented is that it does not work with more than two threads.  A synchronization aid that allows a set of threads to all wait for each other to reach a common barrier point.
+Puzzle: Generalize the rendezvous solution. Every thread should run the following code:
+
+rendezvous
+critical point
+
+The synchronization requirement is that no thread executes critical point until after all threads have executed rendezvous.
+You can assume that there are n threads and that this value is stored in a variable, n, that is accessible from all threads. When the first n − 1 threads arrive they should block until the nth thread arrives, at which point all the threads may proceed.
+The barrier is called cyclic because it can be re-used after the waiting threads are released. 
+
+5. Lightswitch(type of scoreboard) - Categorical exclusion
+Represents a synchronization pattern of light-switch in a room.
+First thread to enter critical section locks the semaphore and last thread leaving critical section unlocks it.
+
+6. Turnstile - Sequencing and blocking
+Represents a turnstile like on a metro station.
+Can be used to make things happen serially with options to block/unblock.
+Some other thread can come and block turnstile.
+
+7. Condition
+	Represents a Condition on with a thread can wait.
+
+
+
